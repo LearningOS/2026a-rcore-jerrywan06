@@ -6,8 +6,8 @@ struct Stdout;
 
 impl Write for Stdout {
     fn write_str(&mut self, s: &str) -> fmt::Result {
-        for c in s.chars() {
-            console_putchar(c as usize);
+        for byte in s.bytes() {
+            console_putchar(byte as usize);
         }
         Ok(())
     }
@@ -28,6 +28,9 @@ macro_rules! print {
 /// Println! to the host console using the format string and arguments.
 #[macro_export]
 macro_rules! println {
+    () => {
+        $crate::console::print(format_args!("\n"))
+    };
     ($fmt: literal $(, $($arg: tt)+)?) => {
         $crate::console::print(format_args!(concat!($fmt, "\n") $(, $($arg)+)?))
     }

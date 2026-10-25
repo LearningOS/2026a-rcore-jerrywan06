@@ -43,7 +43,7 @@ pub fn rust_main() -> ! {
         fn stext(); // begin addr of text segment
         fn etext(); // end addr of text segment
         fn srodata(); // start addr of Read-Only data segment
-        fn erodata(); // end addr of Read-Only data ssegment
+        fn erodata(); // end addr of Read-Only data segment
         fn sdata(); // start addr of data segment
         fn edata(); // end addr of data segment
         fn sbss(); // start addr of BSS segment
@@ -68,12 +68,11 @@ pub fn rust_main() -> ! {
         sdata as usize, edata as usize
     );
     warn!(
-        "[kernel] boot_stack top=bottom={:#x}, lower_bound={:#x}",
-        boot_stack_top as usize, boot_stack_lower_bound as usize
+        "[kernel] boot_stack [{:#x}, {:#x})",
+        boot_stack_lower_bound as usize, boot_stack_top as usize
     );
     error!("[kernel] .bss [{:#x}, {:#x})", sbss as usize, ebss as usize);
 
     use crate::board::QEMUExit;
     crate::board::QEMU_EXIT_HANDLE.exit_success(); // CI autotest success
-                                                   //crate::board::QEMU_EXIT_HANDLE.exit_failure(); // CI autoest failed
 }
