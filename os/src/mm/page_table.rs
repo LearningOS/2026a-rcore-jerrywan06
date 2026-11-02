@@ -1,5 +1,6 @@
 //! Implementation of [`PageTableEntry`] and [`PageTable`].
 use super::{frame_alloc, FrameTracker, PhysAddr, PhysPageNum, StepByOne, VirtAddr, VirtPageNum};
+use crate::config::PAGE_SIZE;
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
@@ -8,13 +9,21 @@ use bitflags::*;
 bitflags! {
     /// page table entry flags
     pub struct PTEFlags: u8 {
+        /// Valid entry.
         const V = 1 << 0;
+        /// Readable page.
         const R = 1 << 1;
+        /// Writable page.
         const W = 1 << 2;
+        /// Executable page.
         const X = 1 << 3;
+        /// Accessible from user mode.
         const U = 1 << 4;
+        /// Global mapping.
         const G = 1 << 5;
+        /// Accessed page.
         const A = 1 << 6;
+        /// Dirty page.
         const D = 1 << 7;
     }
 }
@@ -154,6 +163,37 @@ impl PageTable {
     pub fn token(&self) -> usize {
         8usize << 60 | self.root_ppn.0
     }
+}
+
+/// Translate an entire user buffer, checking canonical addresses and permissions.
+/// Prepared with Codex assistance; see reports/lab2.md.
+pub fn translated_user_buffer(
+    token: usize,
+    ptr: *const u8,
+    len: usize,
+    permission: PTEFlags,
+) -> Option<Vec<&'static mut [u8]>> {
+    let page_table = PageTable::from_token(token);
+    let mut start = ptr as usize;
+    let end = start.checked_add(len)?;
+    let mut buffers = Vec::new();
+    while start < end {
+        let va = VirtAddr::from(start);
+        if usize::from(va) != start {
+            return None;
+        }
+        let pte = page_table.translate(va.floor())?;
+        if !pte.flags().contains(PTEFlags::V | PTEFlags::U | permission)
+            || (pte.writable() && !pte.readable())
+        {
+            return None;
+        }
+        let offset = va.page_offset();
+        let count = (PAGE_SIZE - offset).min(end - start);
+        buffers.push(&mut pte.ppn().get_bytes_array()[offset..offset + count]);
+        start += count;
+    }
+    Some(buffers)
 }
 
 /// Create mutable `Vec<u8>` slice in kernel space from ptr in other address space. NOTICE: the content pointed to by the pointer `ptr` can cross physical pages.
