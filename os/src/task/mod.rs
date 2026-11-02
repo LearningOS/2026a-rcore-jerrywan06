@@ -15,6 +15,7 @@ mod switch;
 mod task;
 
 use crate::loader::{get_app_data, get_num_app};
+use crate::mm::MapPermission;
 use crate::sync::UPSafeCell;
 use crate::trap::TrapContext;
 use alloc::vec::Vec;
@@ -71,6 +72,36 @@ lazy_static! {
 }
 
 impl TaskManager {
+    // Per-task counting is adapted from ch3 with Codex assistance; see reports/lab2.md.
+    fn record_syscall(&self, syscall_id: usize) {
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        if let Some(count) = inner.tasks[current].syscall_times.get_mut(syscall_id) {
+            *count += 1;
+        }
+    }
+
+    fn syscall_count(&self, syscall_id: usize) -> usize {
+        let inner = self.inner.exclusive_access();
+        inner.tasks[inner.current_task]
+            .syscall_times
+            .get(syscall_id)
+            .copied()
+            .unwrap_or(0)
+    }
+
+    fn mmap(&self, start: usize, len: usize, permission: MapPermission) -> bool {
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        inner.tasks[current].memory_set.mmap(start, len, permission)
+    }
+
+    fn munmap(&self, start: usize, len: usize) -> bool {
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        inner.tasks[current].memory_set.munmap(start, len)
+    }
+
     /// Run the first task in task list.
     ///
     /// Generally, the first task in task list is an idle task (we call it zero process later).
@@ -191,6 +222,26 @@ pub fn exit_current_and_run_next() {
 /// Get the current 'Running' task's token.
 pub fn current_user_token() -> usize {
     TASK_MANAGER.get_current_token()
+}
+
+/// Record a syscall before dispatching it for the current task.
+pub fn record_syscall(syscall_id: usize) {
+    TASK_MANAGER.record_syscall(syscall_id);
+}
+
+/// Get the current task's number of calls to a syscall.
+pub fn syscall_count(syscall_id: usize) -> usize {
+    TASK_MANAGER.syscall_count(syscall_id)
+}
+
+/// Allocate anonymous pages in the current task's address space.
+pub fn mmap_current(start: usize, len: usize, permission: MapPermission) -> bool {
+    TASK_MANAGER.mmap(start, len, permission)
+}
+
+/// Remove mappings from the current task's address space.
+pub fn munmap_current(start: usize, len: usize) -> bool {
+    TASK_MANAGER.munmap(start, len)
 }
 
 /// Get the current 'Running' task's trap contexts.
