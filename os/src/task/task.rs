@@ -11,6 +11,10 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::cell::RefMut;
 
+const DEFAULT_PRIORITY: usize = 16;
+/// Scale large enough to keep the pass nonzero even at isize::MAX priority.
+pub(super) const BIG_STRIDE: u64 = 1 << 63;
+
 /// Task control block structure
 ///
 /// Directly save the contents that will not change during running
@@ -71,6 +75,12 @@ pub struct TaskControlBlockInner {
 
     /// Program break
     pub program_brk: usize,
+
+    /// Scheduling weight, at least two.
+    pub priority: usize,
+
+    /// Scheduling cost relative to the current ready queue's minimum.
+    pub stride: u64,
 }
 
 impl TaskControlBlockInner {
@@ -99,7 +109,7 @@ impl TaskControlBlockInner {
 impl TaskControlBlock {
     /// Create a new process
     ///
-    /// At present, it is only used for the creation of initproc
+    /// Used for initproc and directly spawned children.
     pub fn new(elf_data: &[u8]) -> Self {
         // memory_set with elf program headers/trampoline/trap context/user stack
         let (memory_set, user_sp, entry_point) = MemorySet::from_elf(elf_data);
@@ -135,6 +145,8 @@ impl TaskControlBlock {
                     ],
                     heap_bottom: user_sp,
                     program_brk: user_sp,
+                    priority: DEFAULT_PRIORITY,
+                    stride: 0,
                 })
             },
         };
@@ -148,6 +160,20 @@ impl TaskControlBlock {
             trap_handler as usize,
         );
         task_control_block
+    }
+
+    /// Create a child directly from its executable, inheriting open file descriptions.
+    /// Prepared with Codex assistance; see reports/lab4.md.
+    pub fn spawn(self: &Arc<Self>, elf_data: &[u8]) -> Arc<Self> {
+        let child = Arc::new(Self::new(elf_data));
+        let mut parent_inner = self.inner_exclusive_access();
+        {
+            let mut child_inner = child.inner_exclusive_access();
+            child_inner.parent = Some(Arc::downgrade(self));
+            child_inner.fd_table = parent_inner.fd_table.clone();
+        }
+        parent_inner.children.push(child.clone());
+        child
     }
 
     /// Load a new elf to replace the original application address space and start execution
@@ -165,6 +191,9 @@ impl TaskControlBlock {
         inner.memory_set = memory_set;
         // update trap_cx ppn
         inner.trap_cx_ppn = trap_cx_ppn;
+        inner.base_size = user_sp;
+        inner.heap_bottom = user_sp;
+        inner.program_brk = user_sp;
         // initialize trap_cx
         let trap_cx = TrapContext::app_init_context(
             entry_point,
@@ -216,6 +245,8 @@ impl TaskControlBlock {
                     fd_table: new_fd_table,
                     heap_bottom: parent_inner.heap_bottom,
                     program_brk: parent_inner.program_brk,
+                    priority: DEFAULT_PRIORITY,
+                    stride: 0,
                 })
             },
         });

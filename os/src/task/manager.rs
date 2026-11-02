@@ -1,5 +1,5 @@
 //!Implementation of [`TaskManager`]
-use super::TaskControlBlock;
+use super::{task::BIG_STRIDE, TaskControlBlock};
 use crate::sync::UPSafeCell;
 use alloc::collections::VecDeque;
 use alloc::sync::Arc;
@@ -9,7 +9,7 @@ pub struct TaskManager {
     ready_queue: VecDeque<Arc<TaskControlBlock>>,
 }
 
-/// A simple FIFO scheduler.
+/// A Stride scheduler with stable queue ordering for equal scheduling costs.
 impl TaskManager {
     ///Creat an empty TaskManager
     pub fn new() -> Self {
@@ -21,9 +21,25 @@ impl TaskManager {
     pub fn add(&mut self, task: Arc<TaskControlBlock>) {
         self.ready_queue.push_back(task);
     }
-    /// Take a process out of the ready queue
+    /// Select the minimum stride and charge its next scheduling quantum.
+    /// Prepared with Codex assistance; see reports/lab3.md.
     pub fn fetch(&mut self) -> Option<Arc<TaskControlBlock>> {
-        self.ready_queue.pop_front()
+        let (index, minimum) = self
+            .ready_queue
+            .iter()
+            .enumerate()
+            .map(|(index, task)| (index, task.inner_exclusive_access().stride))
+            .min_by_key(|(_, stride)| *stride)?;
+        let task = self.ready_queue.remove(index).unwrap();
+        // Subtracting one common origin preserves ordering and prevents overflow.
+        for ready in self.ready_queue.iter() {
+            ready.inner_exclusive_access().stride -= minimum;
+        }
+        {
+            let mut inner = task.inner_exclusive_access();
+            inner.stride = BIG_STRIDE / inner.priority as u64;
+        }
+        Some(task)
     }
 }
 
