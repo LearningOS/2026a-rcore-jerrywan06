@@ -17,6 +17,7 @@ mod task;
 use crate::config::MAX_APP_NUM;
 use crate::loader::{get_num_app, init_app_cx};
 use crate::sync::UPSafeCell;
+use crate::syscall::MAX_SYSCALL_NUM;
 use lazy_static::*;
 use switch::__switch;
 pub use task::{TaskControlBlock, TaskStatus};
@@ -54,6 +55,7 @@ lazy_static! {
         let mut tasks = [TaskControlBlock {
             task_cx: TaskContext::zero_init(),
             task_status: TaskStatus::UnInit,
+            syscall_times: [0; MAX_SYSCALL_NUM],
         }; MAX_APP_NUM];
         for (i, task) in tasks.iter_mut().enumerate() {
             task.task_cx = TaskContext::goto_restore(init_app_cx(i));
@@ -72,6 +74,24 @@ lazy_static! {
 }
 
 impl TaskManager {
+    // Per-task counting was implemented with Codex assistance; see reports/lab1.md.
+    fn record_syscall(&self, syscall_id: usize) {
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        if let Some(count) = inner.tasks[current].syscall_times.get_mut(syscall_id) {
+            *count += 1;
+        }
+    }
+
+    fn syscall_count(&self, syscall_id: usize) -> usize {
+        let inner = self.inner.exclusive_access();
+        inner.tasks[inner.current_task]
+            .syscall_times
+            .get(syscall_id)
+            .copied()
+            .unwrap_or(0)
+    }
+
     /// Run the first task in task list.
     ///
     /// Generally, the first task in task list is an idle task (we call it zero process later).
@@ -140,6 +160,16 @@ impl TaskManager {
 /// Run the first task in task list.
 pub fn run_first_task() {
     TASK_MANAGER.run_first_task();
+}
+
+/// Record a syscall before dispatching it for the current task.
+pub fn record_syscall(syscall_id: usize) {
+    TASK_MANAGER.record_syscall(syscall_id);
+}
+
+/// Get the current task's number of calls to a syscall.
+pub fn syscall_count(syscall_id: usize) -> usize {
+    TASK_MANAGER.syscall_count(syscall_id)
 }
 
 /// Switch current `Running` task to the task we have found,

@@ -21,6 +21,9 @@ const SYSCALL_GET_TIME: usize = 169;
 /// trace syscall
 const SYSCALL_TRACE: usize = 410;
 
+/// Number of syscall IDs covered by the per-task counters.
+pub const MAX_SYSCALL_NUM: usize = SYSCALL_TRACE + 1;
+
 mod fs;
 mod process;
 
@@ -29,6 +32,8 @@ use process::*;
 
 /// handle syscall exception with `syscall_id` and other arguments
 pub fn syscall(syscall_id: usize, args: [usize; 3]) -> isize {
+    // Count before dispatch so a trace query includes the query itself.
+    crate::task::record_syscall(syscall_id);
     match syscall_id {
         SYSCALL_WRITE => sys_write(args[0], args[1] as *const u8, args[2]),
         SYSCALL_EXIT => sys_exit(args[0] as i32),
